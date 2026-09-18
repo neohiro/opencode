@@ -127,3 +127,5 @@ If you are working on a project that's related to OpenCode and is using "opencod
 ---
 
 **Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+
+[![Visitors](https://api.visitorbadge.io/api/visitors?path=github.com/neohiro/opencode&label=Visitors&countColor=%23263759)](https://visitorbadge.io/status?path=github.com/neohiro/opencode)
