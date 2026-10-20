@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""
+Robust shell wrapper for opencode (Windows-safe).
+Delegates to .opencode/bin/bash, resolved relative to this file so it works
+from any working directory.
+Usage:  python .opencode/bin/shell --command='<cmd>' [--workdir=<dir>] [--timeout=<sec>]
+"""
+import sys, os, subprocess
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BASH = os.path.join(HERE, "bash")
+
+if not os.path.isfile(BASH):
+    print('{"success": false, "message": "bash wrapper not found at %s"}' % BASH, file=sys.stderr)
+    sys.exit(2)
+
+proc = subprocess.run([sys.executable, BASH] + sys.argv[1:])
+sys.exit(proc.returncode)

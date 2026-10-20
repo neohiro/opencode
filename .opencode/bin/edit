@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""
+Robust `edit` for opencode.
+
+Why this exists
+---------------
+Recent opencode sessions logged hundreds of `edit` failures:
+  * "Invalid arguments for tool \"edit\": - path: Missing key"      (128x)
+  * "Could not find oldString in <file>. It must match exactly..."  (50x + many more)
+  * "Found 2 matches for oldString, but expected exactly one..."    (10x)
+  * "No changes to apply: oldString and newString are identical."  (33x)
+  * "Missing key at [\"filePath\"]" / ["oldString"]                  (32x)
+
+This wrapper accepts BOTH schemas (path|filePath, oldString|old_string,
+newString|new_string, replaceAll|replace_all), tolerates CRLF/LF mismatches,
+falls back to whitespace-insensitive matching when the exact match fails,
+and never silently edits the wrong place.
+
+Usage
+-----
+  echo '{"path":"f.txt","oldString":"a","newString":"b"}' | python .opencode/bin/edit
+  python .opencode/bin/edit --path=f.txt --oldString=a --newString=b [--replaceAll=true]
+
+Exit codes: 0 = edited, 1 = error (message on stderr as JSON), 2 = bad args.
+"""
+
+import sys
+import json
+import os
+import re
+import datetime
+import difflib
+
+RESERVED = {"path", "filePath", "file_path", "oldString", "old_string",
+            "newString", "new_string", "replaceAll", "replace_all"}
+
+
+def out(payload, code=0):
+    payload.setdefault("timestamp", datetime.datetime.now().isoformat())
+    stream = sys.stdout if code == 0 else sys.stderr
+    print(json.dumps(payload, ensure_ascii=False), file=stream)
+    sys.exit(code)
+
+
+def collect_args(argv):
+    """Merge JSON from stdin, --key=value flags and bare positional args."""
+    args = {}
+    stdin_text = ""
+    if not sys.stdin.isatty():
+        try:
+            stdin_text = sys.stdin.read()
+        except Exception:
+            stdin_text = ""
+    if stdin_text.strip():
+        try:
+            parsed = json.loads(stdin_text)
+            if isinstance(parsed, dict):
+                args.update(parsed)
+        except json.JSONDecodeError:
+            # Maybe it is not JSON - treat the whole thing as an old/new pair? No: report it.
+            out({"success": False,
+                 "message": "stdin was not valid JSON. Provide "
+                            '{"path":"...","oldString":"...","newString":"..."} or use --flags.'},
+                code=2)
+
+    rest = []
+    for a in argv:
+        if a.startswith("--"):
+            k, _, v = a.partition("=")
+            args[k.lstrip("-")] = v
+        elif a.startswith("-") and len(a) > 1:
+            args[a.lstrip("-")] = True
+        else:
+            rest.append(a)
+
+    # Bare positional: <path> <oldString> <newString>
+    if rest and "path" not in args and "filePath" not in args:
+        if len(rest) >= 3:
+            args["path"] = rest[0]
+            args["oldString"] = rest[1]
+            args["newString"] = rest[2]
+        elif len(rest) == 1:
+            args["path"] = rest[0]
+    return args
+
+
+def pick(args, *names):
+    for n in names:
+        if n in args and args[n] is not None:
+            return args[n]
+    return None
+
+
+def norm_eol(s):
+    return s.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def norm_ws(s):
+    """Whitespace-insensitive form: strip trailing spaces, collapse runs of blanks."""
+    lines = [re.sub(r"[ \t]+", " ", ln).rstrip() for ln in norm_eol(s).split("\n")]
+    return "\n".join(lines).strip()
+
+
+def read_text(path):
+    for enc in ("utf-8", "utf-8-sig", "latin-1"):
+        try:
+            with open(path, "r", encoding=enc, newline="") as f:
+                return f.read(), enc
+        except UnicodeDecodeError:
+            continue
+        except FileNotFoundError:
+            raise
+    raise RuntimeError("unreadable encoding")
+
+
+def find_spans(content, needle):
+    spans = []
+    start = 0
+    while True:
+        idx = content.find(needle, start)
+        if idx == -1:
+            break
+        spans.append((idx, idx + len(needle)))
+        start = idx + max(1, len(needle))
+    return spans
+
+
+def fuzzy_spans(content, needle):
+    """Match ignoring indentation and trailing whitespace, line by line."""
+    n_lines = norm_ws(needle).split("\n")
+    c_lines = norm_eol(content).split("\n")
+    hits = []
+    n = len(n_lines)
+    for i in range(0, len(c_lines) - n + 1):
+        window = [re.sub(r"[ \t]+", " ", ln).rstrip() for ln in c_lines[i:i + n]]
+        if window == n_lines:
+            start = sum(len(l) + 1 for l in c_lines[:i])
+            end = start + sum(len(l) + 1 for l in c_lines[i:i + n]) - 1
+            hits.append((start, end))
+    return hits
+
+
+def apply_spans(content, spans, new_string):
+    out_txt = content
+    for start, end in reversed(spans):
+        out_txt = out_txt[:start] + new_string + out_txt[end:]
+    return out_txt
+
+
+def main():
+    args = collect_args(sys.argv[1:])
+
+    path = pick(args, "path", "filePath", "file_path")
+    old_string = pick(args, "oldString", "old_string")
+    new_string = pick(args, "newString", "new_string")
+
+    if path is None:
+        out({"success": False,
+             "message": "Missing 'path' (alias 'filePath'). "
+                        "Usage: edit --path=<file> --oldString=<text> --newString=<text>"},
+            code=2)
+    if old_string is None:
+        out({"success": False,
+             "message": "Missing 'oldString' (alias 'old_string')."},
+            code=2)
+    if new_string is None:
+        new_string = ""
+    path = os.path.abspath(os.path.expanduser(str(path)))
+
+    replace_all = pick(args, "replaceAll", "replace_all")
+    if isinstance(replace_all, str):
+        replace_all = replace_all.strip().lower() in ("1", "true", "yes", "on")
+    replace_all = bool(replace_all)
+
+    if not os.path.isfile(path):
+        out({"success": False, "message": f"File not found: {path}"}, code=1)
+
+    try:
+        content, enc = read_text(path)
+    except Exception as e:
+        out({"success": False, "message": f"Read error: {e}"}, code=1)
+
+    if old_string == new_string:
+        out({"success": False,
+             "message": "No changes to apply: oldString and newString are identical."},
+            code=1)
+
+    # Match against the raw file first (preserves bytes/line-endings exactly).
+    # Only if that fails do we fall back to normalised matching, in which case
+    # all spans are computed against the LF-normalised `work` text so that
+    # offsets can never drift (the old CRLF+fuzzy path corrupted files).
+    has_bom = content.startswith("\ufeff")
+    nl_style = "\r\n" if ("\r\n" in content and content.count("\r\n") >= content.count("\n") / 2) else "\n"
+    work = norm_eol(content)
+    needle = old_string
+
+    spans = find_spans(content, needle)
+    mode = "exact"
+    base = content
+    if not spans:
+        hits = find_spans(work, norm_eol(needle))
+        if hits:
+            spans = hits
+            mode = "eol-normalized"
+            base = work
+        else:
+            hits = fuzzy_spans(work, needle)
+            if hits:
+                spans = hits
+                mode = "whitespace-tolerant"
+                base = work
+            else:
+                target_lines = [l.strip() for l in norm_eol(needle).split("\n") if l.strip()]
+                file_lines = work.split("\n")
+                closest = difflib.get_close_matches(
+                    target_lines[0] if target_lines else "",
+                    [l.strip() for l in file_lines], n=3, cutoff=0.6)
+                out({"success": False,
+                     "message": f"Could not find oldString in {path}. It must match exactly, "
+                                f"including whitespace and indentation.",
+                     "closest_lines": closest,
+                     "hint": "Read the file first (read tool) and copy the exact text, or use "
+                             "replaceAll=true if the text repeats."},
+                    code=1)
+
+    if len(spans) > 1 and not replace_all:
+        out({"success": False,
+             "message": f"Found {len(spans)} matches for oldString, but expected exactly one. "
+                        "Add more surrounding context to make oldString unique, or set "
+                        "replaceAll=true to replace every occurrence.",
+             "match_count": len(spans)},
+            code=1)
+
+    new_content = apply_spans(base, spans, new_string)
+    if base is work and nl_style == "\r\n":
+        new_content = new_content.replace("\n", "\r\n")
+    if has_bom:
+        new_content = "\ufeff" + new_content
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(new_content)
+    except Exception as e:
+        out({"success": False, "message": f"Write error: {e}"}, code=1)
+    except Exception as e:
+        out({"success": False, "message": f"Write error: {e}"}, code=1)
+
+    out({"success": True,
+         "message": f"Edited {path}",
+         "path": path,
+         "matches": len(spans),
+         "replaced_all": replace_all,
+         "match_mode": mode,
+         "bytes_written": len(new_content.encode("utf-8"))})
+
+
+if __name__ == "__main__":
+    main()
