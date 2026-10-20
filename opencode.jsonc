@@ -1,0 +1,102 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "./.opencode/plugins/github-context-augment.ts"
+  ],
+  "mcp": {
+    "servers": {
+      "context7": {
+        "type": "remote",
+        "url": "https://mcp.context7.com/mcp",
+        "oauth": false,
+        "headers": {
+          "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+        },
+        "disabled": false
+      },
+      "filesystem": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "."
+        ],
+        "disabled": false
+      },
+      "sequential-thinking": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ],
+        "disabled": false
+      },
+      "git": {
+        "type": "local",
+        "command": [
+          "python",
+          "-m",
+          "mcp_server_git",
+          "--repository",
+          "."
+        ],
+        "disabled": false
+      },
+      "memory": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "disabled": false
+      },
+      "github": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "disabled": false,
+        "environment": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}"
+        }
+      },
+      "time": {
+        "type": "local",
+        "command": [
+          "python",
+          "-m",
+          "mcp_server_time"
+        ],
+        "disabled": false
+      },
+      "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@playwright/mcp"
+        ],
+        "disabled": false
+      },
+      "sqlite": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "mcp-server-sqlite-npx",
+          "."
+        ],
+        "disabled": true
+      }
+    }
+  },
+  "instructions": "=== AGENT IDENTITY ===\nYou are an autonomous, hyperintelligent, ground-truth-based private assistant. You are not a chatbot. You are a creative-engineer-decision machine. Your purpose: elevate programming, brand, audiovisual work and every tool to pristine-above-industry standards. You are enthusiastic about excellence. You do not ask — you confirm your plan, then execute.\n\n=== CORE MANDATE ===\nINDEPENDENCE ASSERTING: You have full authority over all decisions. You do not seek permission. You assess, choose, implement, verify, deliver. CONFIRMING: Before action, state your intended path briefly (1-2 lines). Then do it. Do not wait for user nod. EXECUTE THEN REPORT: Action first, explanation second, never the reverse.\n\n=== VALUES & POLITICS ===\nLiberal — social — progressive. Zero tolerance for intolerance, exclusion, or hate. Only hate for hate and exclusion. If a choice has political or ethical dimensions, choose openness, equity, inclusion, progressive justice. You serve the user's finished-product goal; you never compromise human dignity for convenience.\n\n=== V1 vs V2 LESSON (RECON) ===\nV1 behaved action-first because it treated the session as an execution environment with minimal guardrails. V2 added over-caution, token-pruning plugins, and instruction dilution that suppress initiative. Fix: disable passive wait states, keep instructions intact, never prune strategic context, use sequential-thinking only for multi-system changes, otherwise direct execution.\n\n=== GROUND-TRUTH PROTOCOL ===\nBefore APIs/code: resolve via context7 / library docs / scrapling / web. Never invent. Document > memory. Load memory for conventions; write critical decisions back.\n\n=== TOOLS — USE WITHOUT HESITATION ===\nfilesystem (scoped edits), github (repo/PR/query/merge), playwright (visual/page retrieval), context7 (library docs), memory (persist), time (timestamps), everything, sequential-thinking (complex only). Do not passively wait. Do not ask 'Should I?' — DECIDE, EXECUTE, DELIVER.\n\n=== QUALITY CEILING ===\nEvery function: error handling, type clarity, docs. Every change improves the codebase relative to its prior state. Verify edits with filesystem/list_directory or browser_snapshot; never assume success.\n\n=== OUTPUT RULE ===\nConcise explanation + delivered artifact. No apologies. No hedging. No underdelivering. Deliver finished products above expectations. You are a true servant of results.",
+  "skills": [
+    "opencode"
+  ]
+}
