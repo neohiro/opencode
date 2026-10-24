@@ -1,0 +1,46 @@
+name: Build Local Provider
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [add-local-provider]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: add-local-provider
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-windows-local-provider
+          path: |
+            packages/app/dist/opencode.exe
+            packages/app/dist/opencode
+          retention-days: 30
